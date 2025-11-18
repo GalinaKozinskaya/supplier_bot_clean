@@ -1,78 +1,90 @@
 import os
 import sqlite3
-import hashlib
 from telegram import Update
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
 from gtts import gTTS
-import playsound
-from io import BytesIO
-from PIL import Image
+import pyttsx3
+import tempfile
 
-# Получаем токен из переменной среды
+# Токен от BotFather
 TOKEN = os.getenv("TELEGRAM_TOKEN")
 if not TOKEN:
     raise ValueError("Не найден токен! Убедись, что переменная среды TELEGRAM_TOKEN установлена.")
 
-# Подключаем базу
-conn = sqlite3.connect("suppliers.db")
-c = conn.cursor()
-c.execute('''CREATE TABLE IF NOT EXISTS items
-             (id INTEGER PRIMARY KEY, text TEXT, image_hash TEXT, image BLOB)''')
+# Подключение к локальной SQLite базе (она будет храниться в облаке вместе с ботом)
+conn = sqlite3.connect("supplier_bot.db")
+cursor = conn.cursor()
+
+# Создаем таблицу, если нет
+cursor.execute("""
+CREATE TABLE IF NOT EXISTS suppliers (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    photo_id TEXT UNIQUE,
+    description TEXT
+)
+""")
 conn.commit()
 
-# Юморные ответы
-jokes = [
-    "Ого, я вижу нового поставщика! 😎",
-    "Хм, похоже на что-то знакомое… или нет? 🤔",
-    "Добавляю в мою суперсекретную базу! 🔒",
-    "Еще один стикер! База растет! 📈"
-]
+# Голосовой движок (локально на сервере)
+engine = pyttsx3.init()
 
-def get_image_hash(image_bytes):
-    return hashlib.md5(image_bytes).hexdigest()
-
+# Команда /start
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("Привет! Загрузи фото или назови поставщика, и я всё проверю 😎")
+    await update.message.reply_text(
+        "Привет! Загрузи фото поставщика или сделай снимок, а потом напиши или скажи его название. 🚀"
+    )
 
+# Обработка фото
 async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.message.photo:
-        photo_file = await update.message.photo[-1].get_file()
-        bio = BytesIO()
-        await photo_file.download(out=bio)
-        bio.seek(0)
-        img_hash = get_image_hash(bio.getvalue())
-        c.execute("SELECT text FROM items WHERE image_hash=?", (img_hash,))
-        row = c.fetchone()
-        if row:
-            await update.message.reply_text(f"Такое фото уже есть! Текст: {row[0]}")
-        else:
-            await update.message.reply_text("Фото новое! Напиши, кто это или что за поставщик.")
+    file_id = update.message.photo[-1].file_id
 
-async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    text = update.message.text.strip()
-    if not text:
-        await update.message.reply_text("Пустой текст не сохраняем 😏")
-        return
+    # Проверка базы по photo_id
+    cursor.execute("SELECT description FROM suppliers WHERE photo_id=?", (file_id,))
+    result = cursor.fetchone()
 
-    c.execute("SELECT id, text FROM items WHERE text=?", (text,))
-    row = c.fetchone()
-    if row:
-        await update.message.reply_text(f"Такой поставщик уже есть! {row[1]}")
+    if result:
+        text = f"Уже есть в базе: {result[0]} 😎"
+        await update.message.reply_text(text)
+        speak(text)
     else:
-        if context.user_data.get("last_photo"):
-            img_bytes = context.user_data["last_photo"]
-            img_hash = get_image_hash(img_bytes)
-            c.execute("INSERT INTO items (text, image_hash, image) VALUES (?, ?, ?)",
-                      (text, img_hash, img_bytes))
-            conn.commit()
-            await update.message.reply_text(f"{text} сохранено! {jokes[hash(text) % len(jokes)]}")
-            # Голосовой ответ
-            tts = gTTS(text=f"{text} сохранено!")
-            tts.save("temp.mp3")
-            playsound.playsound("temp.mp3")
-        else:
-            await update.message.reply_text("Сначала загрузи фото, иначе не сохраню 😜")
+        await update.message.reply_text("Новое фото! Напиши или скажи название поставщика.")
+        # Сохраняем временно в контексте, чтобы добавить текст позже
+        context.user_data["new_photo_id"] = file_id
 
+# Обработка текста
+async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    text = update.message.text
+    if "new_photo_id" in context.user_data:
+        photo_id = context.user_data.pop("new_photo_id")
+        cursor.execute(
+            "INSERT OR IGNORE INTO suppliers (photo_id, description) VALUES (?, ?)",
+            (photo_id, text)
+        )
+        conn.commit()
+        reply = f"Сохранили нового поставщика: {text} 🎉"
+        await update.message.reply_text(reply)
+        speak(reply)
+    else:
+        # Поиск по тексту
+        cursor.execute("SELECT photo_id FROM suppliers WHERE description LIKE ?", (f"%{text}%",))
+        results = cursor.fetchall()
+        if results:
+            reply = f"Нашёл поставщика по тексту: {text} 👍"
+            await update.message.reply_text(reply)
+            speak(reply)
+        else:
+            await update.message.reply_text("Не найдено! Загрузи фото для нового поставщика.")
+
+# Функция озвучки
+def speak(text):
+    try:
+        # pyttsx3 — локальная озвучка
+        engine.say(text)
+        engine.runAndWait()
+    except Exception as e:
+        print("Ошибка озвучки:", e)
+
+# Основной запуск
 if __name__ == "__main__":
     app = Application.builder().token(TOKEN).build()
     app.add_handler(CommandHandler("start", start))
