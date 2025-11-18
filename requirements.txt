@@ -5,7 +5,7 @@ torch
 torchvision
 faiss-cpu
 =======
-ython-telegram-bot==20.3
+python-telegram-bot==20.3
 pillow
 torch
 torchvision
