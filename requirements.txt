@@ -1,0 +1,14 @@
+<<<<<<< HEAD
+ython-telegram-bot==20.3
+pillow
+torch
+torchvision
+faiss-cpu
+=======
+ython-telegram-bot==20.3
+pillow
+torch
+torchvision
+faiss-cpu
+>>>>>>> add05ee7 (Первый коммит с bot.py и requirements.txt)
+boto3
