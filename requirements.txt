@@ -1,7 +1,7 @@
 python-telegram-bot==20.3
 pillow
-torch
-torchvision
+torch==2.0.1+cpu
+torchvision==0.15.2+cpu
 faiss-cpu
 gTTS
 playsound
