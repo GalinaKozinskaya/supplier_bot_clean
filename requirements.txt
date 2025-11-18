@@ -1,6 +1,4 @@
 python-telegram-bot==20.3
-pillow
-torch
-torchvision
+Pillow
+sqlite3
 faiss-cpu
-boto3
