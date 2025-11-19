@@ -1,109 +1,119 @@
 import os
 import json
+import hashlib
+import random
+import sqlite3
+from io import BytesIO
+from PIL import Image
 from telegram import Update
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
 
-DB_FILE = "database.json"
+DB_PATH = "suppliers.db"
 
-# Загружаем базу или создаём пустую
-if os.path.exists(DB_FILE):
-    with open(DB_FILE, "r", encoding="utf-8") as f:
-        db = json.load(f)
-else:
-    db = {}
-
+# Получаем токен
 TOKEN = os.getenv("TELEGRAM_TOKEN")
 if not TOKEN:
     raise ValueError("Не найден токен! Убедись, что переменная среды TELEGRAM_TOKEN установлена.")
 
-# Утилиты для работы с базой
-def save_db():
-    with open(DB_FILE, "w", encoding="utf-8") as f:
-        json.dump(db, f, ensure_ascii=False, indent=2)
+# Подключение к базе
+conn = sqlite3.connect(DB_PATH, check_same_thread=False)
+cursor = conn.cursor()
+cursor.execute("""
+CREATE TABLE IF NOT EXISTS suppliers (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT,
+    photo_hash TEXT,
+    photo BLOB,
+    description TEXT
+)
+""")
+conn.commit()
 
-def find_supplier_by_text(text):
-    results = []
-    for supplier, items in db.items():
-        for item in items:
-            if text.lower() in item["text"].lower():
-                results.append((supplier, item))
-    return results
+# Юморные ответы бота
+JOKES = [
+    "Ого, похожее уже есть! Добавим новые данные?",
+    "Кажется, я это уже видел 😉",
+    "Ставим клеймо уникальности или дополняем?",
+]
 
-def find_supplier_by_photo(file_id):
-    results = []
-    for supplier, items in db.items():
-        for item in items:
-            if "file_id" in item and item["file_id"] == file_id:
-                results.append((supplier, item))
-    return results
+# Хэш фото для сравнения
+def hash_image(image_bytes):
+    return hashlib.md5(image_bytes).hexdigest()
 
-# Команда /start
+# Проверка, есть ли похожее фото
+def photo_exists(photo_bytes):
+    h = hash_image(photo_bytes)
+    cursor.execute("SELECT id FROM suppliers WHERE photo_hash=?", (h,))
+    result = cursor.fetchone()
+    return result[0] if result else None
+
+# Поиск по названию поставщика
+def find_supplier(name):
+    cursor.execute("SELECT id, photo, description FROM suppliers WHERE name LIKE ?", (f"%{name}%",))
+    return cursor.fetchall()
+
+# /start
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
-        "Привет! Загрузи фото или напиши название поставщика, а я постараюсь найти совпадения.\n"
-        "Если нового нет — я попрошу сохранить фото и текст."
+        "Привет! Загрузи фото поставщика или введи его название. "
+        "Я проверю, есть ли уже запись и покажу, что знаю 😉"
     )
 
-# Обработка текстового сообщения
+# Обработка текста
 async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text.strip()
-    results = find_supplier_by_text(text)
+    results = find_supplier(text)
     if results:
-        response = ""
-        for supplier, item in results:
-            response += f"Поставщик: {supplier}\nОписание: {item['text']}\n\n"
-        await update.message.reply_text(response)
+        reply = ""
+        for r in results:
+            img_bytes = r[1]
+            bio = BytesIO(img_bytes)
+            bio.name = "photo.jpg"
+            bio.seek(0)
+            await update.message.reply_photo(photo=bio, caption=r[2])
+        return
     else:
         await update.message.reply_text(
-            f"Не нашёл такого текста 😅. Отправь вместе с фото, чтобы я добавил нового поставщика."
+            f"Я не нашёл '{text}' 😅. Отправь фото и текст поставщика, чтобы сохранить его."
         )
 
 # Обработка фото
 async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    photo = update.message.photo[-1]  # берём фото наибольшего размера
-    file_id = photo.file_id
+    photo_file = await update.message.photo[-1].get_file()
+    photo_bytes = await photo_file.download_as_bytearray()
+    existing_id = photo_exists(photo_bytes)
+    
+    if existing_id:
+        await update.message.reply_text(random.choice(JOKES))
+        return
+    
+    # Ждём текста после фото
+    context.user_data['pending_photo'] = photo_bytes
+    await update.message.reply_text("Фото получено! Теперь пришли название поставщика.")
 
-    results = find_supplier_by_photo(file_id)
-    if results:
-        response = ""
-        for supplier, item in results:
-            response += f"Поставщик: {supplier}\nОписание: {item['text']}\n\n"
-        await update.message.reply_text(response)
-    else:
-        await update.message.reply_text(
-            "Новое фото! Как зовут поставщика и что за текст на коробке/стикере?"
-        )
-        context.user_data["new_file_id"] = file_id  # запомним фото для добавления
-        context.user_data["awaiting_text"] = True
-
-# Сохранение нового фото+текста
-async def handle_text_for_new_supplier(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if context.user_data.get("awaiting_text"):
-        supplier_info = update.message.text.strip()
-        file_id = context.user_data.pop("new_file_id")
-        context.user_data["awaiting_text"] = False
-
-        # Разделяем название поставщика и текст
-        if " " in supplier_info:
-            supplier_name, text_description = supplier_info.split(" ", 1)
-        else:
-            supplier_name = supplier_info
-            text_description = supplier_info
-
-        if supplier_name not in db:
-            db[supplier_name] = []
-
-        db[supplier_name].append({"file_id": file_id, "text": text_description})
-        save_db()
-
-        await update.message.reply_text(f"Сохранил! Поставщик: {supplier_name}, текст: {text_description} 😎")
-    else:
+# Сохранение нового поставщика после текста
+async def save_supplier(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if 'pending_photo' not in context.user_data:
         await handle_text(update, context)
+        return
+    
+    photo_bytes = context.user_data.pop('pending_photo')
+    name = update.message.text.strip()
+    photo_hash = hash_image(photo_bytes)
+    
+    cursor.execute(
+        "INSERT INTO suppliers (name, photo_hash, photo, description) VALUES (?, ?, ?, ?)",
+        (name, photo_hash, photo_bytes, f"Поставщик {name}")
+    )
+    conn.commit()
+    
+    await update.message.reply_text(f"Запись для '{name}' сохранена! 😎")
 
 if __name__ == "__main__":
     app = Application.builder().token(TOKEN).build()
     app.add_handler(CommandHandler("start", start))
     app.add_handler(MessageHandler(filters.PHOTO, handle_photo))
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text_for_new_supplier))
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, save_supplier))
+    
     print("Бот запущен...")
     app.run_polling()

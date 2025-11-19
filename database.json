@@ -1,0 +1,24 @@
+{
+  "Пежо": [
+    {
+      "file_id": "AgACAgIAAxkBAAMDaRzm3ybpzSjxbpaXVcuO48m4-CMAAg0LaxvL3ehIUCpjOs-gyZ8BAAMCAAN5AAM2BA",
+      "text": "Ситроен"
+    }
+  ],
+  "Авто-транзит": [
+    {
+      "file_id": "AgACAgIAAxkBAAMOaR0SymEyyEV803P6uEHTGd-FobAAAkkLaxvL3ehIHeifMG1dfGMBAAMCAAN5AAM2BA",
+      "text": "Авто-транзит"
+    },
+    {
+      "file_id": "AgACAgIAAxkBAAMWaR0TLvuczrF-SybLlzqM4G1OCdIAAksLaxvL3ehIZC4eO-dQPH8BAAMCAAN5AAM2BA",
+      "text": "Авто-транзит"
+    }
+  ],
+  "Авто1-Смоленск": [
+    {
+      "file_id": "AgACAgIAAxkBAAMSaR0TC1b97ZmD0da9RKA6KBjYogMAAkoLaxvL3ehIiLP_hfvREEcBAAMCAAN5AAM2BA",
+      "text": "Авто1-Смоленск"
+    }
+  ]
+}
