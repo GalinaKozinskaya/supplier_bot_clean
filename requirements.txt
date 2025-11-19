@@ -1,7 +1,2 @@
 python-telegram-bot==20.3
 pillow
-torch
-torchvision
-faiss-cpu
-gTTS
-pyttsx3
